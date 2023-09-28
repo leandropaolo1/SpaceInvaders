@@ -105,36 +105,31 @@ def pygame_to_cvimage(surface):
     return img
 
 def detect_shapes_in_image(image):
-    """Detect shapes in given image and overlay the results."""
+    """Detect shapes in the given image and produce an image with color-coded outlines."""
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     blurred = cv2.GaussianBlur(gray, (5, 5), 0)
     edged = cv2.Canny(blurred, 50, 150)
 
     contours, _ = cv2.findContours(edged, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
+    # Create a completely transparent image to draw outlines
+    outline_img = np.zeros_like(image)
+
     for contour in contours:
         epsilon = 0.04 * cv2.arcLength(contour, True)
         approx = cv2.approxPolyDP(contour, epsilon, True)
 
-        # Draw a bounding rectangle around the detected shape
-        x, y, w, h = cv2.boundingRect(contour)
-        cv2.rectangle(image, (x, y), (x + w, y + h), (0, 255, 255), 2)  # Use a yellow color for bounding box
-
         if len(approx) == 3:
-            shape = "triangle"
-            cv2.drawContours(image, [approx], -1, (0, 255, 0), 3)  # Increase thickness to 3 for emphasis
+            # Triangle - Outline in white
+            cv2.drawContours(outline_img, [contour], -1, (255, 255, 255), 2)
         elif len(approx) == 4:
-            shape = "rectangle"
-            cv2.drawContours(image, [approx], -1, (0, 0, 255), 3)
+            # Rectangle - Outline in red
+            cv2.drawContours(outline_img, [contour], -1, (0, 0, 255), 2)
         else:
-            shape = "circle"
-            cv2.drawContours(image, [contour], -1, (255, 0, 0), 3)
+            # Circle - Outline in lime
+            cv2.drawContours(outline_img, [contour], -1, (0, 255, 0), 2)
             
-        cv2.putText(image, shape, (approx[0][0][0], approx[0][0][1] - 10),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
-
-    return image
-
+    return outline_img
 def main_game():
     all_sprites = pygame.sprite.Group()
     bullets = pygame.sprite.Group()
@@ -162,7 +157,6 @@ def main_game():
                     all_sprites.add(bullet)
                     bullets.add(bullet)
 
-        # Check collisions
         hits = pygame.sprite.groupcollide(bullets, enemies, True, True)
         for hit in hits:
             enemy_hits += 1
@@ -173,27 +167,25 @@ def main_game():
         if pygame.sprite.spritecollide(player, enemies, False):
             running = False
 
-        # Update game state
         all_sprites.update()
-
-        # Capture current game frame as OpenCV image
-        cv_image = pygame_to_cvimage(screen)
-
-        # Detect shapes in the captured frame
-        result_image = detect_shapes_in_image(cv_image)
-
-        # Convert the result back to pygame format and blit onto the screen
-        result_surface = pygame.surfarray.make_surface(result_image[:,:,::-1])  # Flip colors from BGR to RGB
-        screen.blit(result_surface, (0, 0))
-
-        # Draw other game elements
-        draw_text(f"Enemies Hit: {enemy_hits}", 10, 10)
         all_sprites.draw(screen)
 
+        # Capture the game frame
+        cv_image = pygame_to_cvimage(screen)
+        
+        # Get shape outlines
+        outline_image = detect_shapes_in_image(cv_image)
+        
+        outline_image_swapped = np.swapaxes(outline_image, 0, 1)
+        outline_surface = pygame.surfarray.make_surface(outline_image_swapped[:, :, ::-1])
+        screen.blit(outline_surface, (0, 0))
+
+        draw_text(f"Enemies Hit: {enemy_hits}", 10, 10)
         pygame.display.flip()
         pygame.time.Clock().tick(60)
 
-    return game_over_screen(enemy_hits) 
+    return game_over_screen(enemy_hits)
+
 
 play_again = True
 while play_again:
