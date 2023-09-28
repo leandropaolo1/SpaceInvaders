@@ -2,7 +2,7 @@ import numpy as np
 import random
 import pygame
 
-from detect_shape import DetectShape
+from shapes import DetectShape
 pygame.init()
 
 WIDTH, HEIGHT = 800, 600
@@ -50,42 +50,19 @@ class Player(pygame.sprite.Sprite):
         self.rect.x = (WIDTH // 2) - (self.rect.width // 2)
         self.rect.y = HEIGHT - 40
 
-    def update(self):
-        keys = pygame.key.get_pressed()
-        cv_image = pygame_to_cvimage(screen)
-
-        # Detect rectangles in the image
-        rectangles = detect_rectangles(cv_image)
-
-        move_left = keys[pygame.K_LEFT]
-        move_right = keys[pygame.K_RIGHT]
-
-        # If manual keys are not pressed, consider autonomous movement
-        if not (move_left or move_right):
-            collision_path = False
-            for rect in rectangles:
-                # Check if the rectangle's horizontal position is in the path of the player
-                if self.rect.left < rect.right and self.rect.right > rect.left:
-                    collision_path = True
-                    break
-
-            if collision_path:
-                # Calculate available space on both sides
-                space_left = self.rect.left
-                space_right = WIDTH - self.rect.right
-
-                # Move to the side with more space
-                if space_left > space_right and self.rect.left > 0:
-                    move_left = True
-                elif self.rect.right < WIDTH:
-                    move_right = True
-
-        if move_left:
-            self.rect.x -= player_speed
-        if move_right:
-            self.rect.x += player_speed
-
-
+    def update(self, override=False, direction=None):
+        if not override:
+            keys = pygame.key.get_pressed()
+            if keys[pygame.K_LEFT] and self.rect.left > 0:
+                self.rect.x -= player_speed
+            if keys[pygame.K_RIGHT] and self.rect.right < WIDTH:
+                self.rect.x += player_speed
+        else:
+            if direction == True:
+                self.rect.x += player_speed
+            else:
+                self.rect.x -= player_speed
+        
 class Enemy(pygame.sprite.Sprite):
     def __init__(self):
         super().__init__()
@@ -104,7 +81,6 @@ class Enemy(pygame.sprite.Sprite):
 
 
 def game_over_screen(enemy_hits):
-    """Displays the game over screen and waits for player's choice"""
     screen.fill(WHITE)
     draw_text("GAME OVER", WIDTH // 2 - 100, HEIGHT // 2 - 40)
     draw_text(f"Score: {enemy_hits}", WIDTH // 2 - 70, HEIGHT // 2)
@@ -115,6 +91,8 @@ def game_over_screen(enemy_hits):
 
     waiting = True
     while waiting:
+        exit()
+
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 pygame.quit()
@@ -167,6 +145,10 @@ def main_game():
         all_sprites.update()
         all_sprites.draw(screen)
         cv_image = detector.pygame_to_cvimage(screen)
+        collision = detector.collision(cv_image)
+        if collision is not None:
+            print(collision)
+
         outline_image = detector.detect_shapes_in_image(cv_image)
 
         outline_image_swapped = np.swapaxes(outline_image, 0, 1)
