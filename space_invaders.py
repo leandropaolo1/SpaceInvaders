@@ -1,19 +1,14 @@
-import pygame
-import random
-import cv2
 import numpy as np
+import random
+import pygame
 
-# Initialize pygame
+from detect_shape import DetectShape
 pygame.init()
 
-# Screen dimensions
 WIDTH, HEIGHT = 800, 600
-
-# Colors
 WHITE = (255, 255, 255)
 GRAY = (128, 128, 128)
-
-# Screen setup
+detector = DetectShape()
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
 pygame.display.set_caption("Space Invaders")
 
@@ -23,10 +18,12 @@ enemy_speed = 3
 enemy_hits = 0
 font = pygame.font.SysFont(None, 36)
 
+
 def draw_text(text, x, y):
     """Utility function to draw text on the screen"""
     rendeGRAY = font.render(text, True, GRAY)
     screen.blit(rendeGRAY, (x, y))
+
 
 class Bullet(pygame.sprite.Sprite):
     def __init__(self, x, y):
@@ -43,6 +40,7 @@ class Bullet(pygame.sprite.Sprite):
         if self.rect.bottom < 0:
             self.kill()
 
+
 class Player(pygame.sprite.Sprite):
     def __init__(self):
         super().__init__()
@@ -54,10 +52,39 @@ class Player(pygame.sprite.Sprite):
 
     def update(self):
         keys = pygame.key.get_pressed()
-        if keys[pygame.K_LEFT] and self.rect.left > 0:
+        cv_image = pygame_to_cvimage(screen)
+
+        # Detect rectangles in the image
+        rectangles = detect_rectangles(cv_image)
+
+        move_left = keys[pygame.K_LEFT]
+        move_right = keys[pygame.K_RIGHT]
+
+        # If manual keys are not pressed, consider autonomous movement
+        if not (move_left or move_right):
+            collision_path = False
+            for rect in rectangles:
+                # Check if the rectangle's horizontal position is in the path of the player
+                if self.rect.left < rect.right and self.rect.right > rect.left:
+                    collision_path = True
+                    break
+
+            if collision_path:
+                # Calculate available space on both sides
+                space_left = self.rect.left
+                space_right = WIDTH - self.rect.right
+
+                # Move to the side with more space
+                if space_left > space_right and self.rect.left > 0:
+                    move_left = True
+                elif self.rect.right < WIDTH:
+                    move_right = True
+
+        if move_left:
             self.rect.x -= player_speed
-        if keys[pygame.K_RIGHT] and self.rect.right < WIDTH:
+        if move_right:
             self.rect.x += player_speed
+
 
 class Enemy(pygame.sprite.Sprite):
     def __init__(self):
@@ -81,10 +108,11 @@ def game_over_screen(enemy_hits):
     screen.fill(WHITE)
     draw_text("GAME OVER", WIDTH // 2 - 100, HEIGHT // 2 - 40)
     draw_text(f"Score: {enemy_hits}", WIDTH // 2 - 70, HEIGHT // 2)
-    draw_text("Press R to play again or Q to quit", WIDTH // 2 - 220, HEIGHT // 2 + 40)
-    
+    draw_text("Press R to play again or Q to quit",
+              WIDTH // 2 - 220, HEIGHT // 2 + 40)
+
     pygame.display.flip()
-    
+
     waiting = True
     while waiting:
         for event in pygame.event.get():
@@ -98,38 +126,7 @@ def game_over_screen(enemy_hits):
                     pygame.quit()
                     exit()
 
-def pygame_to_cvimage(surface):
-    """Convert pygame surface to OpenCV image."""
-    img_str = pygame.image.tostring(surface, "RGB")
-    img = np.frombuffer(img_str, dtype=np.uint8).reshape((HEIGHT, WIDTH, 3))
-    return img
 
-def detect_shapes_in_image(image):
-    """Detect shapes in the given image and produce an image with color-coded outlines."""
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    blurred = cv2.GaussianBlur(gray, (5, 5), 0)
-    edged = cv2.Canny(blurred, 50, 150)
-
-    contours, _ = cv2.findContours(edged, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-    # Create a completely transparent image to draw outlines
-    outline_img = np.zeros_like(image)
-
-    for contour in contours:
-        epsilon = 0.04 * cv2.arcLength(contour, True)
-        approx = cv2.approxPolyDP(contour, epsilon, True)
-
-        if len(approx) == 3:
-            # Triangle - Outline in white
-            cv2.drawContours(outline_img, [contour], -1, (255, 255, 255), 2)
-        elif len(approx) == 4:
-            # Rectangle - Outline in red
-            cv2.drawContours(outline_img, [contour], -1, (0, 0, 255), 2)
-        else:
-            # Circle - Outline in lime
-            cv2.drawContours(outline_img, [contour], -1, (0, 255, 0), 2)
-            
-    return outline_img
 def main_game():
     all_sprites = pygame.sprite.Group()
     bullets = pygame.sprite.Group()
@@ -169,15 +166,12 @@ def main_game():
 
         all_sprites.update()
         all_sprites.draw(screen)
+        cv_image = detector.pygame_to_cvimage(screen)
+        outline_image = detector.detect_shapes_in_image(cv_image)
 
-        # Capture the game frame
-        cv_image = pygame_to_cvimage(screen)
-        
-        # Get shape outlines
-        outline_image = detect_shapes_in_image(cv_image)
-        
         outline_image_swapped = np.swapaxes(outline_image, 0, 1)
-        outline_surface = pygame.surfarray.make_surface(outline_image_swapped[:, :, ::-1])
+        outline_surface = pygame.surfarray.make_surface(
+            outline_image_swapped[:, :, ::-1])
         screen.blit(outline_surface, (0, 0))
 
         draw_text(f"Enemies Hit: {enemy_hits}", 10, 10)
