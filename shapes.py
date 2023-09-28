@@ -69,8 +69,7 @@ class DetectShape:
         if not triangle_position:
             return None
 
-        # Determine the speed once for a representative rectangle
-        x, y, w, h = cv2.boundingRect(contours[0])  # assuming we always have at least one contour for a rectangle
+        x, y, w, h = cv2.boundingRect(contours[0])
         middle_position = (x + w // 2, y + h // 2)
         self.speed = self.speed_calculator.calculate_speed(middle_position, current_time)
 
