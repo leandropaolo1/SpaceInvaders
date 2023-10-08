@@ -1,4 +1,6 @@
 from speed import SpeedCalculator
+from qlearning import QLearning
+
 import numpy as np
 import pygame
 import time
