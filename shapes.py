@@ -76,6 +76,8 @@ class DetectShape:
         x, y, w, h = cv2.boundingRect(contours[0])
         middle_position = (x + w // 2, y + h // 2)
         self.speed = self.speed_calculator.calculate_speed(middle_position, current_time)
+        if abs(self.speed) < 0.01:
+            self.speed = 0.01
 
         for rect_corners in self.rectangle_positions:
             top_left, top_right, bottom_left, bottom_right = rect_corners

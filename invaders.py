@@ -1,26 +1,27 @@
 import numpy as np
 import random
 import pygame
+import pickle
 
 from shapes import DetectShape
+
 pygame.init()
 
 WIDTH, HEIGHT = 800, 600
 WHITE = (255, 255, 255)
 GRAY = (128, 128, 128)
 detector = DetectShape()
+
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
 pygame.display.set_caption("Space Invaders")
 
-player_speed = 5
-enemy_speed = 3
+player_speed = 10
+enemy_speed = 10
 
-enemy_hits = 0
 font = pygame.font.SysFont(None, 36)
 
 
 def draw_text(text, x, y):
-    """Utility function to draw text on the screen"""
     rendeGRAY = font.render(text, True, GRAY)
     screen.blit(rendeGRAY, (x, y))
 
@@ -33,7 +34,7 @@ class Bullet(pygame.sprite.Sprite):
         self.rect = self.image.get_rect()
         self.rect.centerx = x
         self.rect.centery = y
-        self.speed = -8  # Negative because it will move upwards
+        self.speed = -8
 
     def update(self):
         self.rect.y += self.speed
@@ -58,11 +59,12 @@ class Player(pygame.sprite.Sprite):
             if keys[pygame.K_RIGHT] and self.rect.right < WIDTH:
                 self.rect.x += player_speed
         else:
-            if direction == True:
+            if direction == 1 and self.rect.right < WIDTH:
                 self.rect.x += player_speed
-            else:
+            if direction == -1 and self.rect.left > 0:
                 self.rect.x -= player_speed
-        
+
+
 class Enemy(pygame.sprite.Sprite):
     def __init__(self):
         super().__init__()
@@ -91,64 +93,108 @@ def game_over_screen(enemy_hits):
 
     waiting = True
     return True
-    #while waiting:
-    #   exit()
-
-    #    for event in pygame.event.get():
-    #        if event.type == pygame.QUIT:
-    #            pygame.quit()
-    #            exit()
-    #        if event.type == pygame.KEYDOWN:
-    #            if event.key == pygame.K_r:
-    #                return True  # Play again
-    #            if event.key == pygame.K_q:
-    #                pygame.quit()
-    #                exit()
+    while waiting:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                exit()
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_r:
+                    return True  # Play again
+                if event.key == pygame.K_q:
+                    pygame.quit()
+                    exit()
 
 
 Q = {}
-alpha = 0.1  # Learning rate
-gamma = 0.9  # Discount factor
-epsilon = 0.1  # Exploration rate
+alpha = 0.1
+gamma = 0.9
+epsilon = 0.1
+alpha_decay = 0.999
+epsilon_decay = 0.9995
+EDGE_THRESHOLD = 50
+
+
+def save_q_values():
+    with open("q_values.pkl", "wb") as f:
+        pickle.dump(Q, f)
+
+
+def load_q_values():
+    global Q
+    try:
+        with open("q_values.pkl", "rb") as f:
+            Q = pickle.load(f)
+    except FileNotFoundError:
+        pass
+
 
 def get_state(detector):
-    # Using the detector to get the positions
     enemies_pos = detector.rectangle_positions
     player_pos = detector.triangle_position
 
-    # Simplified state: player's x position and the x position of the closest enemy
-    if not enemies_pos:
+    if not enemies_pos or not player_pos:
         return None
-    closest_enemy = min(enemies_pos, key=lambda pos: pos[1])  # Assuming the y position is at index 1
-    return (player_pos[0], closest_enemy[0])  # Considering only x positions for simplicity
 
+    player_x = player_pos[2][0]
+    player_top = player_pos[2][1]  # Tip of the triangle
+    player_bottom = player_pos[0][1]  # Base of the triangle
+    close_to_left_edge = player_x <= EDGE_THRESHOLD
+    close_to_right_edge = player_x >= (WIDTH - EDGE_THRESHOLD)
+
+    # Get the closest enemy that will collide with any part of the player's triangle
+    colliding_enemies = [pos for pos in enemies_pos if pos[1]
+                         >= player_top and pos[1] <= player_bottom]
+    if colliding_enemies:
+        closest_enemy = min(colliding_enemies, key=lambda pos: pos[1])
+    else:
+        closest_enemy = min(enemies_pos, key=lambda pos: pos[1])
+
+    return (player_x, closest_enemy[0], closest_enemy[1], close_to_left_edge, close_to_right_edge)
 
 
 def choose_action(state):
-    if random.uniform(0, 1) < epsilon:
-        # Choose a random action
-        return random.choice([-1, 0, 1])
+    if not state:
+        return random.choice([-1, 1])
+    if state[2]:  # close_to_left_edge
+        valid_actions = [0, 1]
+        Q[state][0] = -1e5
+    elif state[3]:  # close_to_right_edge
+        valid_actions = [-1, 0]
+        Q[state][2] = -1e5
     else:
-        # Choose the action with the highest Q-value
-        q_values = Q.get(state, [0, 0, 0])
-        return [-1, 0, 1][np.argmax(q_values)]
+        valid_actions = [-1, 0, 1]
+
+    if random.uniform(0, 1) < epsilon:
+        return random.choice(valid_actions)
+    else:
+        q_values = Q.get(state, [random.uniform(-1, 1) for _ in range(3)])
+        action_idx = np.argmax(
+            [q_values[i+1] if i in valid_actions else -np.inf for i in [-1, 0, 1]])
+        return [-1, 0, 1][action_idx]
 
 
 def learn(state, action, reward, next_state):
-    # Update Q-values using the Q-learning formula
-    current_q = Q.get(state, [0, 0, 0])[action]
-    max_next_q = max(Q.get(next_state, [0, 0, 0]))
+    current_q = Q.get(state, [random.uniform(-1, 1)
+                      for _ in range(3)])[action + 1]
+    max_next_q = max(
+        Q.get(next_state, [random.uniform(-1, 1) for _ in range(3)]))
     new_q = current_q + alpha * (reward + gamma * max_next_q - current_q)
     if state not in Q:
-        Q[state] = [0, 0, 0]
-    Q[state][action] = new_q
+        Q[state] = [random.uniform(-1, 1) for _ in range(3)]
+    Q[state][action + 1] = new_q
+
+
+episode_hits = []
+iterations = 0
+
 
 def main_game():
+    global iterations, alpha, epsilon
     all_sprites = pygame.sprite.Group()
     bullets = pygame.sprite.Group()
     player = Player()
     all_sprites.add(player)
-
     enemies = pygame.sprite.Group()
     for i in range(5):
         enemy = Enemy()
@@ -157,10 +203,14 @@ def main_game():
 
     running = True
     enemy_hits = 0
+    total_reward = 0
+    last_action = None
+    last_state = None
 
     while running:
-        screen.fill(WHITE)
+        reward = 100  # Reward for avoidance
 
+        screen.fill(WHITE)
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
@@ -178,31 +228,60 @@ def main_game():
             enemies.add(enemy)
 
         if pygame.sprite.spritecollide(player, enemies, False):
+            reward = -100
             running = False
+
+        total_reward += reward
 
         all_sprites.update()
         all_sprites.draw(screen)
         cv_image = detector.pygame_to_cvimage(screen)
-        collision = detector.collision(cv_image)
-        if collision is not None:
-            print(collision)
+        state = get_state(detector)
+
+        if state:
+            action = choose_action(state)
+            player.update(True, action)
+        else:
+            action = random.choice([-1, 1])
+            player.update(True, action)
+
+        next_state = get_state(detector)
+
+        if last_state is not None and last_action is not None:
+            learn(last_state, last_action, reward, next_state)
+
+        last_state = state
+        last_action = action
 
         outline_image = detector.detect_shapes_in_image(cv_image)
-
         outline_image_swapped = np.swapaxes(outline_image, 0, 1)
         outline_surface = pygame.surfarray.make_surface(
             outline_image_swapped[:, :, ::-1])
         screen.blit(outline_surface, (0, 0))
-
         draw_text(f"Enemies Hit: {enemy_hits}", 10, 10)
+        draw_text(f"Iterations: {iterations}", 10, 30)
+        draw_text(f"AI Score (Total Reward): {total_reward}", 10, 50)
+
         pygame.display.flip()
         pygame.time.Clock().tick(60)
+
+        iterations += 1  # increment iterations
+
+        # Decay the learning rate and exploration rate
+        alpha *= alpha_decay
+        epsilon *= epsilon_decay
 
     return game_over_screen(enemy_hits)
 
 
+load_q_values()  # Load the Q-values at the start
 play_again = True
 while play_again:
     play_again = main_game()
+
+save_q_values()  # Save the Q-values at the end
+with open("episode_hits.txt", "w") as f:
+    for hits in episode_hits:
+        f.write(f"{hits}\n")
 
 pygame.quit()
