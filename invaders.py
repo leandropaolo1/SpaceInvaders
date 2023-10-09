@@ -1,10 +1,8 @@
-from qlearning import QLearning
-from shapes import DetectShape
 import numpy as np
 import random
 import pygame
 
-
+from shapes import DetectShape
 pygame.init()
 
 WIDTH, HEIGHT = 800, 600
@@ -20,7 +18,7 @@ enemy_speed = 3
 enemy_hits = 0
 font = pygame.font.SysFont(None, 36)
 
-qlearning = QLearning(actions=["left", "right", "none"])
+
 def draw_text(text, x, y):
     """Utility function to draw text on the screen"""
     rendeGRAY = font.render(text, True, GRAY)
@@ -86,21 +84,66 @@ def game_over_screen(enemy_hits):
     screen.fill(WHITE)
     draw_text("GAME OVER", WIDTH // 2 - 100, HEIGHT // 2 - 40)
     draw_text(f"Score: {enemy_hits}", WIDTH // 2 - 70, HEIGHT // 2)
+    draw_text("Press R to play again or Q to quit",
+              WIDTH // 2 - 220, HEIGHT // 2 + 40)
+
     pygame.display.flip()
 
-    pygame.time.wait(2000)  # Wait for 2 seconds
-
+    waiting = True
     return True
+    #while waiting:
+    #   exit()
 
-def get_state(player, enemies):
-    nearest_enemy = min(enemies, key=lambda e: abs(e.rect.x - player.rect.x))
-    return nearest_enemy.rect.x - player.rect.x
+    #    for event in pygame.event.get():
+    #        if event.type == pygame.QUIT:
+    #            pygame.quit()
+    #            exit()
+    #        if event.type == pygame.KEYDOWN:
+    #            if event.key == pygame.K_r:
+    #                return True  # Play again
+    #            if event.key == pygame.K_q:
+    #                pygame.quit()
+    #                exit()
 
-qlearning = QLearning(actions=[-1, 0, 1], epsilon=0.9)
+
+Q = {}
+alpha = 0.1  # Learning rate
+gamma = 0.9  # Discount factor
+epsilon = 0.1  # Exploration rate
+
+def get_state(detector):
+    # Using the detector to get the positions
+    enemies_pos = detector.rectangle_positions
+    player_pos = detector.triangle_position
+
+    # Simplified state: player's x position and the x position of the closest enemy
+    if not enemies_pos:
+        return None
+    closest_enemy = min(enemies_pos, key=lambda pos: pos[1])  # Assuming the y position is at index 1
+    return (player_pos[0], closest_enemy[0])  # Considering only x positions for simplicity
+
+
+
+def choose_action(state):
+    if random.uniform(0, 1) < epsilon:
+        # Choose a random action
+        return random.choice([-1, 0, 1])
+    else:
+        # Choose the action with the highest Q-value
+        q_values = Q.get(state, [0, 0, 0])
+        return [-1, 0, 1][np.argmax(q_values)]
+
+
+def learn(state, action, reward, next_state):
+    # Update Q-values using the Q-learning formula
+    current_q = Q.get(state, [0, 0, 0])[action]
+    max_next_q = max(Q.get(next_state, [0, 0, 0]))
+    new_q = current_q + alpha * (reward + gamma * max_next_q - current_q)
+    if state not in Q:
+        Q[state] = [0, 0, 0]
+    Q[state][action] = new_q
 
 def main_game():
-    last_state = None
-    last_action = None
     all_sprites = pygame.sprite.Group()
     bullets = pygame.sprite.Group()
     player = Player()
@@ -118,19 +161,6 @@ def main_game():
     while running:
         screen.fill(WHITE)
 
-        state = get_state(player, enemies)
-        if last_state is not None and last_action is not None:
-            reward = 1
-            if pygame.sprite.spritecollide(player, enemies, False):
-                reward = -100
-            qlearning.learn(last_state, last_action, reward, state)
-
-        action = qlearning.choose_action(state)
-        if action == -1:  # Move left
-            player.update(override=True, direction=False)
-        elif action == 1:  # Move right
-            player.update(override=True, direction=True)
-
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
@@ -139,9 +169,6 @@ def main_game():
                     bullet = Bullet(player.rect.centerx, player.rect.top)
                     all_sprites.add(bullet)
                     bullets.add(bullet)
-        last_state = state
-        last_action = action
-
 
         hits = pygame.sprite.groupcollide(bullets, enemies, True, True)
         for hit in hits:
