@@ -61,7 +61,7 @@ class Player(pygame.sprite.Sprite):
         else:
             if direction == 1 and self.rect.right < WIDTH:
                 self.rect.x += player_speed
-            if direction == -1 and self.rect.left > 0:
+            elif direction == -1 and self.rect.left > 0:
                 self.rect.x -= player_speed
 
 
@@ -107,12 +107,12 @@ def game_over_screen(enemy_hits):
 
 
 Q = {}
-alpha = 0.1
-gamma = 0.9
-epsilon = 0.1
-alpha_decay = 0.999
-epsilon_decay = 0.9995
-EDGE_THRESHOLD = 50
+alpha = 0.01
+gamma = 0.09
+epsilon = 0.01
+alpha_decay = 0.0999
+epsilon_decay = 0.09995
+EDGE_THRESHOLD = 1
 
 
 def save_q_values():
@@ -137,29 +137,23 @@ def get_state(detector):
         return None
 
     player_x = player_pos[2][0]
-    player_top = player_pos[2][1]  # Tip of the triangle
-    player_bottom = player_pos[0][1]  # Base of the triangle
     close_to_left_edge = player_x <= EDGE_THRESHOLD
     close_to_right_edge = player_x >= (WIDTH - EDGE_THRESHOLD)
+    closest_enemy = min(enemies_pos, key=lambda pos: pos[1])
 
-    # Get the closest enemy that will collide with any part of the player's triangle
-    colliding_enemies = [pos for pos in enemies_pos if pos[1]
-                         >= player_top and pos[1] <= player_bottom]
-    if colliding_enemies:
-        closest_enemy = min(colliding_enemies, key=lambda pos: pos[1])
-    else:
-        closest_enemy = min(enemies_pos, key=lambda pos: pos[1])
+    # Include speed in the state representation
+    speed = detector.speed
 
-    return (player_x, closest_enemy[0], closest_enemy[1], close_to_left_edge, close_to_right_edge)
+    return (player_x, closest_enemy[0], closest_enemy[1], close_to_left_edge, close_to_right_edge, speed)
 
 
 def choose_action(state):
     if not state:
-        return random.choice([-1, 1])
-    if state[2]:  # close_to_left_edge
+        return random.choice([-1, 0, 1])
+    if state[3]:  # close_to_left_edge
         valid_actions = [0, 1]
         Q[state][0] = -1e5
-    elif state[3]:  # close_to_right_edge
+    elif state[4]:  # close_to_right_edge
         valid_actions = [-1, 0]
         Q[state][2] = -1e5
     else:
@@ -168,9 +162,8 @@ def choose_action(state):
     if random.uniform(0, 1) < epsilon:
         return random.choice(valid_actions)
     else:
-        q_values = Q.get(state, [random.uniform(-1, 1) for _ in range(3)])
-        action_idx = np.argmax(
-            [q_values[i+1] if i in valid_actions else -np.inf for i in [-1, 0, 1]])
+        q_values = Q.get(state, [random.uniform(-1, 1) for _ in range(4)])  # Updated for 4 actions
+        action_idx = np.argmax([q_values[i+1] if i in valid_actions else -np.inf for i in [-1, 0, 1]])
         return [-1, 0, 1][action_idx]
 
 
@@ -187,10 +180,11 @@ def learn(state, action, reward, next_state):
 
 episode_hits = []
 iterations = 0
+total_reward =0 
 
 
 def main_game():
-    global iterations, alpha, epsilon
+    global iterations, alpha, epsilon, total_reward
     all_sprites = pygame.sprite.Group()
     bullets = pygame.sprite.Group()
     player = Player()
@@ -203,7 +197,6 @@ def main_game():
 
     running = True
     enemy_hits = 0
-    total_reward = 0
     last_action = None
     last_state = None
 
@@ -228,7 +221,7 @@ def main_game():
             enemies.add(enemy)
 
         if pygame.sprite.spritecollide(player, enemies, False):
-            reward = -100
+            reward = -10000
             running = False
 
         total_reward += reward
@@ -238,12 +231,12 @@ def main_game():
         cv_image = detector.pygame_to_cvimage(screen)
         state = get_state(detector)
 
-        if state:
-            action = choose_action(state)
-            player.update(True, action)
+        if not detector.collision(cv_image):
+            action = 0  # Do nothing
         else:
-            action = random.choice([-1, 1])
-            player.update(True, action)
+            action = choose_action(state)
+
+        player.update(True, action)
 
         next_state = get_state(detector)
 
